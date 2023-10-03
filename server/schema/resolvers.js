@@ -1,37 +1,101 @@
-const User = require('./models/User'); // Import your Mongoose User model
+const { User } = require('../models');
+const { signToken } = require('../utils/auth');
 
 const resolvers = {
   Query: {
-    // Query to fetch a user by ID
-    getUserById: async (_, { userId }) => {
+    // get a single user by either their id or their username
+    getSingleUser: async (_, { id, username }) => {
       try {
-        const user = await User.findById(userId);
-        return user;
-      } catch (error) {
-        throw new Error(`Error fetching user: ${error.message}`);
-      }
-    },
-    
-    // Query to fetch all users
-    getAllUsers: async () => {
-      try {
-        const users = await User.find();
-        return users;
-      } catch (error) {
-        throw new Error(`Error fetching users: ${error.message}`);
+        const foundUser = await User.findOne({
+          $or: [{ _id: id }, { username }],
+        });
+
+        if (!foundUser) {
+          throw new Error('Cannot find a user with this id or username');
+        }
+
+        return foundUser;
+      } catch (err) {
+        throw new Error(err.message);
       }
     },
   },
-  
   Mutation: {
-    // Mutation to create a new user
-    createUser: async (_, { username, email }) => {
+    // create a user, sign a token, and send it back
+    createUser: async (_, { input }) => {
       try {
-        const user = new User({ username, email });
-        await user.save();
-        return user;
-      } catch (error) {
-        throw new Error(`Error creating user: ${error.message}`);
+        const user = await User.create(input);
+
+        if (!user) {
+          throw new Error('Something went wrong while creating the user');
+        }
+
+        const token = signToken(user);
+        return { token, user };
+      } catch (err) {
+        throw new Error(err.message);
+      }
+    },
+
+    // login a user, sign a token, and send it back
+    login: async (_, { input }) => {
+      try {
+        const user = await User.findOne({
+          $or: [{ username: input.username }, { email: input.email }],
+        });
+
+        if (!user) {
+          throw new Error("Can't find this user");
+        }
+
+        const correctPw = await user.isCorrectPassword(input.password);
+
+        if (!correctPw) {
+          throw new Error('Wrong password');
+        }
+
+        const token = signToken(user);
+        return { token, user };
+      } catch (err) {
+        throw new Error(err.message);
+      }
+    },
+
+    // save a book to a user's `savedBooks` field
+    saveBook: async (_, { input, userId }) => {
+      try {
+        const updatedUser = await User.findOneAndUpdate(
+          { _id: userId },
+          { $addToSet: { savedBooks: input } },
+          { new: true, runValidators: true }
+        );
+
+        if (!updatedUser) {
+          throw new Error("Couldn't find user with this id");
+        }
+
+        return updatedUser;
+      } catch (err) {
+        throw new Error(err.message);
+      }
+    },
+
+    // remove a book from `savedBooks`
+    deleteBook: async (_, { bookId, userId }) => {
+      try {
+        const updatedUser = await User.findOneAndUpdate(
+          { _id: userId },
+          { $pull: { savedBooks: { bookId } } },
+          { new: true }
+        );
+
+        if (!updatedUser) {
+          throw new Error("Couldn't find user with this id");
+        }
+
+        return updatedUser;
+      } catch (err) {
+        throw new Error(err.message);
       }
     },
   },
